@@ -1,0 +1,1770 @@
+---
+title: hw7 
+author: Jialing Deng
+date: Feb 28
+output:
+  pdf_document:
+    toc: true
+    toc_depth: 1
+---
+
+_Note:_ To help show what your homework should look like, these solutions don't
+display the code used.  You should look at the Rmd file as well to see those.
+(The comments to the code include some notes on why it's done the way it is, and
+alternatives.)
+
+```{r, include=FALSE}
+# Standard set-up
+library(knitr)
+knitr::opts_chunk$set(warning=FALSE, message=FALSE)
+
+
+# Set knitr options for knitting code into the report:
+# - Save results so that code blocks aren't re-run unless code changes (cache),
+  # _or_ a relevant earlier code block changed (autodep)
+  # but don't re-run if only the comments changed (cache.comments)
+# - Don't clutter R output with messages or warnings (message, warning)
+  # This _will_ leave error messages showing up in the knitted report
+# - By default, don't print the code (echo)
+opts_chunk$set(cache=TRUE, autodep=TRUE, cache.comments=FALSE,
+               message=FALSE, warning=FALSE, echo=FALSE)
+```
+
+
+### Q1.
+
+
+### a.
+
+Evaluating predictions only on the testing set is important because it provides 
+an unbiased estimate of model performance on unseen data. If we evaluate the model 
+on the same training data that was used to build the model, we risk overfitting, 
+so the model may perform well on the training data but fail to generalize to 
+new cases. 
+
+
+
+
+### b. 
+
+Randomly dividing the data ensures that both the training and testing sets are 
+representative of the overall dataset, reducing the risk of introducing systematic 
+biases. If the split is not random, certain patterns or features may be disproportionately
+represented in one subset, leading to misleading performance estimates and a model 
+that does not generalize well. Randomization helps create a more balanced and fair 
+evaluation of the model.
+
+
+
+
+
+
+```{r}
+setwd("/Users/dengjialing/Downloads")
+
+full_data <- read.csv("compas_violence.csv", header=TRUE, stringsAsFactors=FALSE)
+
+test_indices <- scan("testing_set.txt", what=integer(), skip=1)
+
+
+test_set <- full_data[test_indices, ]
+train_set <- full_data[-test_indices, ]
+
+# Save the training and testing datasets as CSV files
+write.csv(train_set, "training_set.csv", row.names=FALSE)
+write.csv(test_set, "testing_set_processed.csv", row.names=FALSE)
+
+train_df<-read.csv("training_set.csv", header=TRUE, stringsAsFactors=FALSE)
+
+test_df <- read.csv("testing_set_processed.csv", header=TRUE, stringsAsFactors=FALSE)
+
+
+prop_rearrested <- mean(test_df$two_year_recid == 1)
+
+
+
+```
+
+
+### c.
+
+18.41%  of people in the testing set are re-arrested for violence within two years. 
+
+\newpage
+
+### Q2.
+```{r}
+
+logit_model <- glm(two_year_recid ~ age + priors_count, data=train_df, family=binomial)
+```
+
+### a. 
+```{r}
+
+library(boot)
+
+
+# Logistic regression model
+logit_model <- glm(two_year_recid ~ age + priors_count, data=train_df, family=binomial)
+
+
+ rboot<- function(statistic, simulator, B) {
+  tboots <- replicate(B, statistic(simulator()))
+  if (is.null(dim(tboots))) {
+    tboots <- array(tboots, dim=c(1, B))
+  }
+  return(tboots)
+}
+
+bootstrap <- function(tboots, summarizer, ...) {
+  summaries <- apply(tboots, 1, summarizer, ...)
+  return(t(summaries))  
+}
+
+equitails <- function(x, alpha) {
+  lower <- quantile(x, alpha/2)
+  upper <- quantile(x, 1-alpha/2)
+  return(c(lower, upper))
+}
+
+bootstrap.ci <- function(statistic=NULL, simulator=NULL, tboots=NULL,
+                         B=if (!is.null(tboots)) { ncol(tboots) },
+                         t.hat, level) {
+  if (is.null(tboots)) {
+    stopifnot(!is.null(statistic))
+    stopifnot(!is.null(simulator))
+    stopifnot(!is.null(B))
+    tboots <- rboot(statistic, simulator, B)
+  }
+  
+  alpha <- 1 - level
+  intervals <- bootstrap(tboots, summarizer=equitails, alpha=alpha)
+  
+  upper <- t.hat + (t.hat - intervals[,1])
+  lower <- t.hat + (t.hat - intervals[,2])
+  
+  return(cbind(lower=lower, upper=upper))
+}
+
+
+logistic_estimator <- function(data) {
+  model <- glm(two_year_recid ~ age + priors_count, data=data, family=binomial)
+  return(coef(model))  
+}
+
+
+resample.cases <- function() {
+  resampled_data <- train_df[sample(1:nrow(train_df), replace=TRUE), ]
+  return(resampled_data)
+}
+
+# Bootstrap confidence intervals for logistic regression coefficients
+set.seed(123) 
+logistic_ci <- bootstrap.ci(
+  statistic = logistic_estimator,
+  simulator = resample.cases,
+  B = 400,
+  t.hat = logistic_estimator(train_df),
+  level = 0.95
+)
+
+
+coef_table <- data.frame(
+  Coefficient = names(coef(logit_model)),
+  Estimate = coef(logit_model),
+  Lower_95_CI = logistic_ci[, "lower"],
+  Upper_95_CI = logistic_ci[, "upper"]
+)
+
+
+
+
+
+
+```
+### Regression Coefficients
+
+The estimated regression coefficients along with their 95% confidence intervals are:
+
+Intercept (\(\beta_0\)): 
+  \[
+  \hat{\beta_0} = -0.156, \quad 95\% \text{ CI: } [-0.5482, 0.2370]
+  \]
+
+Age (\(\beta_1\)):    \[
+  \hat{\beta_1} = -0.061, \quad 95\% \text{ CI: } [-0.0728, -0.0465]
+  \]
+
+Priors Count(\(\beta_2\)):  
+  \[
+  \hat{\beta_2} = 0.162, \quad 95\% \text{ CI: } [0.1381, 0.1825]
+  \]
+
+
+
+
+
+
+### b.
+
+
+- \( \log \left( \frac{P(Y=1)}{P(Y=0)} \right) \) represents the log-odds of recidivism.
+- \( \beta_0 = -0.155 \) (Intercept) is the baseline log-odds of recidivism when 
+both age and priors are zero.
+- \( \beta_1 = -0.061 \) means that for every additional year of age, the l
+og-odds of recidivism decrease by 0.061. This suggests that older individuals 
+are less likely to recidivate.
+- \( \beta_2 = 0.162 \) means that each additional prior conviction increases 
+the log-odds of recidivism by 0.162. This suggests that having more prior offenses
+leads to a higher chance of re-arrest.
+
+
+
+### c.
+```{r}
+library(mgcv)  
+library(boot)  
+
+
+new_data <- data.frame(
+  age = c(19, 22, 34, 42),
+  priors_count = c(1, 2, 0, 12)  
+)
+
+
+new_data <- data.frame(
+  age = c(19, 22, 34, 42),
+  priors_count = c(1, 2, 0, 12) )
+
+
+pred_probs <- predict(logit_model, new_data, type="response")
+
+
+logit_estimator <- function(data) {
+  model <- glm(two_year_recid ~ age + priors_count, data=data, family=binomial)
+  predict(model, new_data, type="response")  
+}
+
+
+resample.cases <- function() {
+  resampled_data <- train_df[sample(1:nrow(train_df), replace=TRUE), ]
+  return(resampled_data)
+}
+
+
+set.seed(123)
+boot_preds <- rboot(statistic=logit_estimator, simulator=resample.cases, B=400)
+
+
+ci_table <- bootstrap(tboots=boot_preds, summarizer=equitails, alpha=0.05)
+
+
+results <- data.frame(
+  Individual = c("Archie", "Betty", "Chuck", "Veronica"),
+  Predicted_Probability = pred_probs,
+  CI_Lower = ci_table[, 1],
+  CI_Upper = ci_table[, 2]
+)
+
+
+
+```
+
+
+
+For Archie, \( P(\text{Recidivism}) = 0.241 \) with confidence interval \([0.211, 0.273]\).
+
+For Betty, \( P(\text{Recidivism}) = 0.237 \) with confidence interval \([0.212, 0.263]\).
+
+For Chuck, \( P(\text{Recidivism}) = 0.098 \) with confidence interval \([0.085, 0.109]\).
+
+For Veronica, \( P(\text{Recidivism}) = 0.317 \) with confidence interval \([0.272, 0.363]\).
+
+\newpage
+
+### Q3. 
+
+### a. 
+
+```{r}
+
+library(dbplyr)
+library(tidyverse)
+library(ggplot2)
+
+
+
+test_probs <- predict(logit_model, test_df, type="response")
+
+
+evaluate_threshold <- function(t) {
+  predictions <- ifelse(test_probs >= t, 1, 0)  
+  actual <- as.numeric(test_df$two_year_recid)  
+  correct <- sum(predictions == actual) / length(actual)  
+  FP <- sum(predictions == 1 & actual == 0)
+  TN <- sum(predictions == 0 & actual == 0)
+  FPR <- FP / (FP + TN)
+
+  FN <- sum(predictions == 0 & actual == 1)
+  TP <- sum(predictions == 1 & actual == 1)
+  FNR <- FN / (FN + TP)
+
+  return(c(t, correct, FPR, FNR))
+}
+
+
+thresholds <- seq(0, 1, length.out=101)
+eval_results <- t(sapply(thresholds, evaluate_threshold))
+
+
+colnames(eval_results) <- c("Threshold", "Accuracy", "FPR", "FNR")
+eval_results <- as.data.frame(eval_results)
+
+
+best_threshold <- eval_results$Threshold[which.max(eval_results$Accuracy)]
+best_accuracy <- max(eval_results$Accuracy)
+
+
+baseline_accuracy <- max(mean(test_df$two_year_recid == "1"), mean(test_df$two_year_recid == "0"))
+
+
+
+
+```
+
+### a.
+
+```{r}
+ggplot(eval_results, aes(x=Threshold, y=Accuracy)) +
+  geom_line(color="blue") +
+  geom_point(color="black") +  # Add dots at each threshold
+  geom_hline(yintercept=baseline_accuracy, linetype="dashed", color="red") +
+  labs(title="Accuracy vs. Threshold for Logistic", x="Threshold", y="Accuracy") +
+  annotate("text", x=0.5, y=baseline_accuracy + 0.02, label="Baseline Accuracy", color="red") +
+  theme_minimal()
+
+```
+
+At threshold = 0.39 is the accuracy maximized. The horizontal line should return 1. 
+The baseline accuracy is 0.816. 
+
+
+
+### b.
+
+```{r}
+
+
+ggplot(eval_results, aes(x=Threshold, y=FPR)) +
+  geom_line(color="red") +
+  geom_point(color="black") +  # Add dots at each threshold
+  labs(title="False Positive Rate vs. Threshold", x="Threshold", y="FPR") +
+  theme_minimal()
+
+
+
+
+
+
+```
+FPR is minimized when threshold is equal to 1. 
+
+
+### c. 
+```{r}
+
+ggplot(eval_results, aes(x=Threshold, y=FNR)) +
+  geom_line(color="green") +
+  geom_point(color="black") +  # Add dots at each threshold
+  labs(title="False Negative Rate vs. Threshold", x="Threshold", y="FNR") +
+  theme_minimal()
+
+
+```
+FNR is minimized when threshold is equal to 0. 
+
+### d. 
+
+```{r}
+ggplot(eval_results, aes(x=FPR, y=FNR)) +
+  geom_line(color="purple") +
+  geom_point(color="black") +  # Add dots at each point
+  geom_abline(slope=-1, intercept=1, linetype="dashed", color="gray") +
+  labs(title="FNR vs. FPR", x="False Positive Rate (FPR)", y="False Negative Rate (FNR)") +
+  annotate("text", x=0.5, y=0.5, label="Random Classifier Line", color="gray") +
+  theme_minimal()
+```
+
+The curve stays below the dashed line, indicating that logistic regression
+provides better predictive power than random guessing.
+The model reduces FNR more effectively for the same level of FPR, meaning it 
+identifies more true positives while keeping false positives manageable.
+
+
+
+
+
+
+
+
+
+
+\newpage
+
+
+
+
+
+### Q4. 
+
+
+### a.
+```{r}
+
+library(mgcv)
+
+gam_model <- gam(two_year_recid ~ s(age) + s(priors_count), family=binomial, data=train_df)
+
+
+
+plot(gam_model,se=TRUE,shade=TRUE)
+
+```
+
+### b.
+
+As age increases, the risk of recidivism gradually declines.
+The decline is relatively steady until about 60 years old, beyond which the effect
+is less certain (wider confidence intervals).
+The curve flattens slightly for middle-aged individuals, suggesting a slower decline in 
+recidivism risk for this group.
+
+
+The function shows a positive relationship between the number of prior convictions 
+and predicted recidivism risk.
+Initially, as priors_count increases from 0 to around 10, the recidivism risk 
+increases steadily. Beyond 10 priors, the relationship flattens somewhat, suggesting
+that having more priors still increases recidivism risk but at a slower rate.
+
+
+
+### c.
+
+
+```{r}
+library(mgcv)  
+library(boot)  
+
+
+new_data <- data.frame(
+  age = c(19, 22, 34, 42),
+  priors_count = c(1, 2, 0, 12)  
+)
+
+
+gam_model <- gam(two_year_recid ~ s(age) + s(priors_count), data=train_df, family=binomial)
+
+
+new_data <- data.frame(
+  age = c(19, 22, 34, 42),
+  priors_count = c(1, 2, 0, 12)  
+)
+
+
+pred_probs <- predict(gam_model, new_data, type="response")
+
+
+gam_estimator <- function(data) {
+  model <- gam(two_year_recid ~ s(age) + s(priors_count), data=data, family=binomial)
+  predict(model, new_data, type="response")  
+}
+
+
+resample.cases <- function() {
+  resampled_data <- train_df[sample(1:nrow(train_df), replace=TRUE), ]
+  return(resampled_data)
+}
+
+
+set.seed(123)
+boot_preds <- rboot(statistic=gam_estimator, simulator=resample.cases, B=400)
+
+
+ci_table <- bootstrap(tboots=boot_preds, summarizer=equitails, alpha=0.05)
+
+
+results <- data.frame(
+  Individual = c("Archie", "Betty", "Chuck", "Veronica"),
+  Predicted_Probability = pred_probs,
+  CI_Lower = ci_table[, 1],
+  CI_Upper = ci_table[, 2]
+)
+
+
+
+```
+
+For Archie, the predicted probability of recidivism is:
+\[
+P(\text{Recidivism}) = 0.378
+\]
+with a 95% confidence interval of:
+\[
+[0.236, 0.563]
+\]
+
+For Betty, the predicted probability of recidivism is:
+\[
+P(\text{Recidivism}) = 0.292
+\]
+with a 95% confidence interval of:
+\[
+[0.249, 0.362]
+\]
+
+For Chuck, the predicted probability of recidivism is:
+\[
+P(\text{Recidivism}) = 0.073
+\]
+with a 95% confidence interval of:
+\[
+[0.052, 0.092]
+\]
+
+For Veronica, the predicted probability of recidivism is:
+\[
+P(\text{Recidivism}) = 0.298
+\]
+with a 95% confidence interval of:
+\[
+[0.203, 0.415]
+\]
+
+
+\newpage
+
+
+### Q5.
+
+
+```{r}
+
+gam_probs <- predict(gam_model, test_df, type="response")
+
+evaluate_model <- function(pred_probs) {
+  thresholds <- seq(0, 1, length.out=101)
+  evaluate_threshold <- function(t) {
+    predictions <- ifelse(pred_probs >= t, 1, 0) 
+    actual <- as.numeric(test_df$two_year_recid)  
+    
+ 
+    correct <- sum(predictions == actual) / length(actual) 
+    
+  
+    FP <- sum(predictions == 1 & actual == 0)
+    TN <- sum(predictions == 0 & actual == 0)
+    FPR <- FP / (FP + TN)
+    
+    
+    FN <- sum(predictions == 0 & actual == 1)
+    TP <- sum(predictions == 1 & actual == 1)
+    FNR <- FN / (FN + TP)
+    
+    return(c(t, correct, FPR, FNR))
+  }
+  
+  
+  eval_results <- t(sapply(thresholds, evaluate_threshold))
+  colnames(eval_results) <- c("Threshold", "Accuracy", "FPR", "FNR")
+  
+  return(as.data.frame(eval_results))
+}
+
+
+gam_eval_results <- evaluate_model(gam_probs)
+
+
+best_gam_threshold <- gam_eval_results$Threshold[which.max(gam_eval_results$Accuracy)]
+best_gam_accuracy <- max(gam_eval_results$Accuracy)
+
+
+
+baseline_accuracy <- max(mean(test_df$two_year_recid == "1"), mean(test_df$two_year_recid == "0"))
+
+
+```
+
+
+### a. 
+```{r}
+ggplot(gam_eval_results, aes(x=Threshold, y=Accuracy)) +
+  geom_line(color="blue") +
+  geom_point(color="black") +  # Add dots at each threshold
+  geom_hline(yintercept=baseline_accuracy, linetype="dashed", color="red") +
+  labs(title="GAM: Accuracy vs. Threshold", x="Threshold", y="Accuracy") +
+  annotate("text", x=0.5, y=baseline_accuracy + 0.02, label="Baseline Accuracy", color="red") +
+  theme_minimal()
+
+```
+
+\[
+\text{At threshold } = 0.45, \text{ the accuracy is maximized at } 83.58\%.
+\]
+
+
+
+### b. 
+```{r}
+ggplot(gam_eval_results, aes(x=FPR, y=FNR)) +
+  geom_line(color="purple") +
+  geom_point(color="black") +  # Add dots at each point
+  geom_abline(slope=-1, intercept=1, linetype="dashed", color="gray") +
+  labs(title="GAM: FNR vs. FPR", x="False Positive Rate (FPR)", y="False Negative Rate (FNR)") +
+  annotate("text", x=0.5, y=0.5, label="Random Classifier", color="gray") +
+  theme_minimal()
+
+```
+
+### c. 
+```{r}
+
+logit_probs <- predict(logit_model, test_df, type="response")
+logit_eval_results <- evaluate_model(logit_probs)
+
+
+ggplot() +
+  geom_line(data=logit_eval_results, aes(x=Threshold, y=Accuracy), color="blue") +
+  geom_line(data=gam_eval_results, aes(x=Threshold, y=Accuracy), color="green") +
+  geom_point(data=logit_eval_results, aes(x=Threshold, y=Accuracy), color="black") +
+  geom_point(data=gam_eval_results, aes(x=Threshold, y=Accuracy), color="black") +
+  geom_hline(yintercept=baseline_accuracy, linetype="dashed", color="red") +
+  labs(title="Comparison: GAM vs Logistic Regression (Accuracy)", x="Threshold", y="Accuracy") +
+  theme_minimal() +
+  annotate("text", x=0.3, y=max(logit_eval_results$Accuracy), label="Logistic Regression", color="blue") +
+  annotate("text", x=0.7, y=max(gam_eval_results$Accuracy), label="GAM", color="green")
+
+```
+At low thresholds (t < 0.2), GAM (green) outperforms logistic regression (blue)  
+slightly. This suggests that GAM provides better accuracy when predicting a higher 
+number of recidivists. At moderate thresholds (0.2 to 0.5), logistic regression and
+GAM perform very  similarly, with logistic regression slightly higher in some regions. 
+
+At high thresholds (t > 0.5), both models converge to the same accuracy.  
+This indicates that when fewer individuals are classified as recidivists, both 
+models make similar predictions. 
+
+\newpage
+
+### Q6.
+
+
+```{r}
+
+library(tree)
+
+
+
+train_df$two_year_recid <- as.factor(train_df$two_year_recid)
+
+
+tree_model <- tree(as.factor(two_year_recid) ~. -v_score, data=train_df)
+
+```
+### a. 
+```{r}
+
+plot(tree_model)
+text(tree_model, pretty=0, cex=0.8) 
+```
+
+### b.
+
+The tree model used prior counts and age to make predictions. 
+
+
+### c. 
+
+If an individual has fewer than 2.5 prior convictions, the model checks their age. 
+If an individual has 2.5 or more prior convictions, they are predicted as not recidivating. 
+Among individuals with fewer than 2.5 priors, the model checks if they are 
+younger than  21.5 years old. If age is above 21.5 but below 38.5, the model makes 
+another check. However, all individuals still end up classified as non-recidivists.
+Among  individuals with more than 2.5 priors, the model checks if they are under 36.5 
+years old. However, all cases result in a classification of 0 (no recidivism).  
+This tree is trivial and ineffective because it predicts all individuals as 
+non-recidivists (0). The tree suggests that age and priors_count alone do not
+provide enough discriminatory power to separate recidivists from non-recidivists.  
+
+
+
+
+
+
+
+### d. 
+
+```{r,warning=FALSE}
+library(tree)
+
+
+train_df$two_year_recid <- as.factor(train_df$two_year_recid)
+
+new_data_tree <- data.frame(
+  age = c(19, 22, 34, 42),
+  priors_count = c(1, 2, 0, 12),
+  charge_degree = factor(c("F", "M", "M", "F")), 
+  sex = factor(c("Male", "Female", "Male", "Female")),
+  race = factor(c("Caucasian", "Caucasian", "African-American", "Hispanic"))
+)
+
+tree_df <- train_df[, !(names(train_df) %in% c("v_score"))]
+
+tree_model <- tree((two_year_recid) ~., data=tree_df)
+
+
+ rboot<- function(statistic, simulator, B) {
+  tboots <- replicate(B, statistic(simulator()))
+  if (is.null(dim(tboots))) {
+    tboots <- array(tboots, dim=c(1, B))
+  }
+  return(tboots)
+}
+
+tree_estimator <- function(data=new_data_tree) {
+  tree_model<-tree(two_year_recid ~ ., data=data)
+  predict(tree_model, new_data_tree, family="binomial") [,2] 
+}
+
+
+resample.cases <- function() {
+  resampled_data <- tree_df[sample(1:nrow(tree_df), replace=TRUE), ]
+  return(resampled_data)
+}
+
+
+set.seed(402)
+boot_preds <- rboot(statistic=tree_estimator, simulator=resample.cases, B=400)
+
+
+ci_table <- bootstrap(tboots=boot_preds, summarizer=equitails, alpha=0.05)
+
+
+results <- data.frame(
+  Individual = c("Archie", "Betty", "Chuck", "Veronica"),
+  Predicted_Probability = pred_probs,
+  CI_Lower = ci_table[, 1],
+  CI_Upper = ci_table[, 2]
+)
+
+
+```
+
+For Archie, the predicted probability of recidivism is:
+\[
+P(\text{Recidivism}) = 0.378
+\]
+with a 95% confidence interval of:
+\[
+[0.12, 1.00]
+\]
+
+For Betty, the predicted probability of recidivism is:
+\[
+P(\text{Recidivism}) = 0.292
+\]
+with a 95% confidence interval of:
+\[
+[0.08, 0.34]
+\]
+
+For Chuck, the predicted probability of recidivism is:
+\[
+P(\text{Recidivism}) = 0.073
+\]
+with a 95% confidence interval of:
+\[
+[0.05, 0.15]
+\]
+
+For Veronica, the predicted probability of recidivism is:
+\[
+P(\text{Recidivism}) = 0.298
+\]
+with a 95% confidence interval of:
+\[
+[0.12, 0.50]
+\]
+
+
+
+### Q7.
+```{r}
+library(ggplot2)
+
+
+tree_probs <- predict(tree_model, test_df, family="binomial")[,2]
+
+
+evaluate_model <- function(pred_probs, actual_values) {
+  thresholds <- seq(0, 1, length.out=101)  
+  
+  evaluate_threshold <- function(t) {
+    predictions <- ifelse(pred_probs >= t, 1, 0)  
+    actual <- as.numeric(actual_values)  
+
+    
+    correct <- sum(predictions == actual) / length(actual)
+
+    
+    FP <- sum(predictions == 1 & actual == 0)
+    TN <- sum(predictions == 0 & actual == 0)
+    FPR <- ifelse((FP + TN) > 0, FP / (FP + TN), 0)
+
+    
+    FN <- sum(predictions == 0 & actual == 1)
+    TP <- sum(predictions == 1 & actual == 1)
+    FNR <- ifelse((FN + TP) > 0, FN / (FN + TP), 0)
+
+    return(c(t, correct, FPR, FNR))
+  }
+
+ 
+  eval_results <- t(sapply(thresholds, evaluate_threshold))
+  colnames(eval_results) <- c("Threshold", "Accuracy", "FPR", "FNR")
+
+  return(as.data.frame(eval_results))
+}
+
+
+tree_eval_results <- evaluate_model(tree_probs, test_df$two_year_recid)
+
+
+best_tree_threshold <- tree_eval_results$Threshold[which.max(tree_eval_results$Accuracy)]
+best_tree_accuracy <- max(tree_eval_results$Accuracy)
+
+
+baseline_accuracy <- max(mean(test_df$two_year_recid == "1"), mean(test_df$two_year_recid == "0"))
+
+
+```
+
+
+### a. 
+```{r}
+
+ggplot(tree_eval_results, aes(x=Threshold, y=Accuracy)) +
+  geom_point(color="black") + geom_line(color="blue") +
+  geom_hline(yintercept=baseline_accuracy, linetype="dashed", color="red", linewidth=1) +
+  labs(title="Decision Tree: Accuracy vs Threshold", 
+       x="Threshold", 
+       y="Accuracy") +
+  theme_minimal() +
+  annotate("text", x=0.5, y=baseline_accuracy + 0.02, 
+           label=sprintf("Baseline Accuracy = %.2f", baseline_accuracy), color="red")
+
+
+```
+
+### b. 
+
+```{r}
+ggplot(tree_eval_results, aes(x=FPR, y=FNR)) +
+  geom_point(color="black") + geom_line(color="blue") +
+  geom_abline(slope=-1, intercept=1, linetype="dashed", color="red") +
+  labs(title="Decision Tree: FPR vs FNR", 
+       x="False Positive Rate", 
+       y="False Negative Rate") +
+  theme_minimal()
+
+```
+
+
+The plot for the Decision Tree Model has fewer than 101 points because decision 
+trees make discrete predictions, meaning that the probability outputs are not 
+continuous like in logistic regression or GAM models.
+
+
+
+
+
+
+### c. 
+
+The Decision Tree model has significantly fewer threshold points, leading to a 
+less smooth FNR vs. FPR curve. The Logistic Regression and GAM models produce a 
+much smoother FNR vs. FPR curve with more granularity. The GAM model appears to 
+provide more flexibility across different thresholds.
+
+
+For the decision tree, FPR and FNR do not get very close to zero simultaneously.
+This suggests that the tree model struggles with a balanced trade-off. 
+
+The GAM model achieves lower FNR at a given FPR compared to the Decision Tree.
+At high thresholds, both FPR and FNR get much closer to zero compared to the Decision Tree.
+
+The logistic regression model behaves similarly to GAM but appears slightly worse off. 
+
+
+
+
+\newpage
+
+### Q8.
+```{r}
+library(ggplot2)
+
+compas_scores <- test_df$v_score  
+actual_values <- as.numeric(test_df$two_year_recid)  
+
+compas_thresholds <- 1:11  
+
+
+compute_accuracy <- function(t) {
+  predictions <- ifelse(compas_scores >= t, 1, 0)
+  mean(predictions == actual_values)
+}
+
+compas_accuracies <- sapply(compas_thresholds, compute_accuracy)
+
+compas_accuracy_df <- data.frame(
+  Threshold = compas_thresholds,
+  Accuracy = compas_accuracies
+)
+```
+
+
+```{r}
+ggplot(compas_accuracy_df, aes(x=Threshold, y=Accuracy)) +
+  geom_point(color="black") + geom_line(color="blue") +
+  geom_hline(yintercept=max(compas_accuracies), linetype="dashed", color="red") +
+  labs(title="COMPAS: Accuracy vs Threshold", x="Threshold (t)", y="Accuracy") +
+  theme_minimal()
+
+```
+
+When we set a threshold t, we predict that someone will be arrested for a violent 
+crime only if their COMPAS score is at least t. At t = 11, since no one has a 
+COMPAS score of 11, we predict that no one will be arrested for violence.
+Setting t=11 ensures that we see the full transition from always predicting 
+recidivism (t = 1) to never predicting recidivism (t = 11). 
+
+
+
+### b. 
+```{r}
+
+compute_fpr_fnr <- function(t) {
+  predictions <- ifelse(compas_scores >= t, 1, 0)
+  
+  fp <- sum(predictions == 1 & actual_values == 0)
+  tn <- sum(predictions == 0 & actual_values == 0)
+  fpr <- ifelse((fp + tn) > 0, fp / (fp + tn), 0)
+
+  fn <- sum(predictions == 0 & actual_values == 1)
+  tp <- sum(predictions == 1 & actual_values == 1)
+  fnr <- ifelse((fn + tp) > 0, fn / (fn + tp), 0)
+
+  return(c(fpr, fnr))
+}
+
+
+compas_fpr_fnr_values <- t(sapply(compas_thresholds, compute_fpr_fnr))
+
+
+compas_fpr_fnr_df <- data.frame(
+  FPR = compas_fpr_fnr_values[,1],
+  FNR = compas_fpr_fnr_values[,2]
+)
+
+
+ggplot(compas_fpr_fnr_df, aes(x=FPR, y=FNR)) +
+  geom_point(color="black") + geom_line(color="blue") +
+  geom_abline(slope=-1, intercept=1, linetype="dashed", color="red") +
+  labs(title="COMPAS: FPR vs FNR", x="False Positive Rate", y="False Negative Rate") +
+  theme_minimal()
+
+```
+
+
+### c.
+
+The dashed red line shows the baseline accuracy, meaning COMPAS does not 
+significantly outperform it. However, GAM peaks above the baseline accuracy. The
+GLM also peaks near the baseline accuracy. On the other hand, the accuracy for 
+decision tree fluctuates significantly, so it is not as consistent as COMPAS or GAM
+or logistic model. In general, GAM achieves high accuracy more efficiently than COMPAS.
+COMPAS is more stable than the Decision Tree but does not outperform GAM and GLM.
+
+
+\newpage
+
+### Q9. 
+
+```{r}
+
+
+logit_model <- glm(two_year_recid ~ age + priors_count, data=test_df)
+frequency.vs.probability <- function(p.lower, p.increment,
+  model, events) {
+  fitted.probs <- fitted(model)
+
+
+  indices <- (fitted.probs >= p.lower) & (fitted.probs < p.lower+p.increment)
+ 
+
+  ave.prob <- mean(fitted.probs[indices])
+  frequency <- mean(events[indices])
+  individual.vars <- fitted.probs[indices]*(1-fitted.probs[indices])
+  var.of.average <- sum(individual.vars)/(sum(indices)^2)
+  se <- sqrt(var.of.average)
+  out <- c(frequency=frequency, ave.prob=ave.prob, se=se)
+  return(out)
+}
+
+
+```
+
+
+
+
+```{r}
+
+
+
+f.vs.p <- sapply(seq(0, 8/10, by = 0.1), frequency.vs.probability, p.increment=0.1,
+                 model=logit_model, events=test_df$two_year_recid)
+f.vs.p <- data.frame(frequency=f.vs.p["frequency",],
+                     ave.prob=f.vs.p["ave.prob",],
+                     se=f.vs.p["se",])
+
+```
+
+### a. 
+```{r}
+par(pty="s") # Square plotting window
+plot(frequency~ave.prob, data=f.vs.p, xlab="Predicted probabilities",
+     ylab="Observed frequencies", xlim=c(0,1), ylim=c(0,1))
+points(f.vs.p$ave.prob, f.vs.p$frequency, pch=16, col="blue")
+rug(fitted(logit_model), col="lightgrey")
+abline(0,1, col="darkgrey")
+segments(x0=f.vs.p$ave.prob, y0=f.vs.p$ave.prob-1.96*f.vs.p$se,
+                             y1=f.vs.p$ave.prob+1.96*f.vs.p$se)
+```
+
+
+
+```{r}
+
+
+gam_model<-gam(two_year_recid ~ s(age) + s(priors_count), family=binomial, data=test_df)
+f.vs.p <- sapply(0:8/10, frequency.vs.probability, p.increment=0.1,
+                 model=gam_model, events=test_df$two_year_recid)
+f.vs.p <- data.frame(frequency=f.vs.p["frequency",],
+                     ave.prob=f.vs.p["ave.prob",],
+                     se=f.vs.p["se",])
+
+par(pty="s")
+plot(frequency~ave.prob, data=f.vs.p, xlab="Predicted probabilities",
+     ylab="Observed frequencies", xlim=c(0,1), ylim=c(0,1))
+
+points(f.vs.p$ave.prob, f.vs.p$frequency, pch=16, col="blue")
+rug(fitted(gam_model),col="lightgrey")
+abline(0,1,col="darkgrey")
+segments(x0=f.vs.p$ave.prob,y0=f.vs.p$ave.prob-1.96*f.vs.p$se,
+  y1=f.vs.p$ave.prob+1.96*f.vs.p$se)
+```
+
+
+```{r}
+library(tree)
+
+frequency.vs.probability <- function(p.lower, p.increment, model, events) {
+  fitted.probs <- predict(model, type="vector")[,2]  
+
+  indices <- (fitted.probs >= p.lower) & (fitted.probs < p.lower + p.increment)
+   ave.prob <- mean(fitted.probs[indices], na.rm = TRUE)
+  frequency <- mean(events[indices], na.rm = TRUE)
+  individual.vars <- fitted.probs[indices] * (1 - fitted.probs[indices])
+  var.of.average <- sum(individual.vars, na.rm = TRUE) / (sum(indices, na.rm = TRUE)^2)
+  se <- sqrt(var.of.average)
+
+  return(c(frequency=frequency, ave.prob=ave.prob, se=se))
+}
+
+
+
+tree_model <- tree(two_year_recid ~., data=tree_df)
+
+fitted.probs <- predict(tree_model, test_df, family="binomial")[,2]
+ 
+
+
+
+f.vs.p <- sapply(seq(0, 0.6, by = 0.1), frequency.vs.probability, p.increment=0.1,
+                 model=tree_model, events=test_df$two_year_recid)
+
+f.vs.p <- data.frame(frequency=f.vs.p["frequency",],
+                     ave.prob=f.vs.p["ave.prob",],
+                     se=f.vs.p["se",])
+
+par(pty="s") # Square plotting window
+plot(frequency~ave.prob, data=f.vs.p, xlab="Predicted probabilities",
+     ylab="Observed frequencies", xlim=c(0,1), ylim=c(0,1))
+points(f.vs.p$ave.prob, f.vs.p$frequency, pch=16, col="blue")
+rug(fitted(logit_model), col="lightgrey")
+abline(0,1, col="darkgrey")
+segments(x0=f.vs.p$ave.prob, y0=f.vs.p$ave.prob-1.96*f.vs.p$se,
+                             y1=f.vs.p$ave.prob+1.96*f.vs.p$se)
+```
+
+### b.
+
+The GAM model appears to be the best-calibrated overall, as it follows the diagonal 
+line closely. The logistic regression model is slightly worse, especially at high 
+probabilities (0.8). 
+
+
+Comparing the error bars, the decision tree has the least amount of error, but 
+there are too few points, so hard to make generalized conclusion.The error bar 
+for logistic model and the gam are both larger than the decision tree, while the 
+gam has slightly smaller error than the logistic model. In conclusion, the GAM is 
+more well calibrated, the decision tree is also well calibrated by looking at the only 
+few predictions. The logistic model is worse calibrated than the other two models. 
+
+
+
+
+
+### c.
+
+
+```{r}
+library(tidyverse)
+compas_summary <- test_df %>%
+  group_by(v_score) %>%
+  summarise(
+    frequency = mean(two_year_recid),
+    n = n(),
+    se = sqrt(frequency * (1 - frequency) / n)
+  )
+
+
+ggplot(compas_summary, aes(x=v_score, y=frequency)) +
+  geom_point(color="blue") +
+  geom_errorbar(aes(ymin=frequency - 2*se, ymax=frequency + 2*se), width=0.2) +
+  labs(x="COMPAS Score", y="Recidivism Frequency",
+       title="Observed Recidivism vs. COMPAS Score") +
+  theme_minimal()
+
+```
+
+
+The standard error (SE) of the observed recidivism frequency is calculated using the formula:
+
+$$ SE = \sqrt{\frac{p(1 - p)}{n}} $$
+
+where:
+
+\( p \) is the observed recidivism frequency for each COMPAS score,
+ \( n \) is the number of individuals with that specific score.
+
+ Since the variance of a binomial proportion is given by \( p(1 - p) \), 
+ dividing by the sample size \( n \) gives the estimated variance of the sample mean. 
+ 
+
+
+
+### d.
+
+The COMPAS score is an ordinal risk score, not a probability, so they are not 
+modeled as calibrated probabilities between 0 and 1. Calibration plots typically 
+check whether the model outputs reliable probability estimates, whereas the 
+COMPAS plot merely shows an empirical relationship between a score and an outcome.
+
+
+
+
+
+### e.
+
+The COMPAS score is designed to reflect the risk of recidivism, with higher 
+scores indicating a greater likelihood of reoffending.The general trend from the plot
+appears to be increasing, meaning that individuals with higher COMPAS scores tend 
+to have a higher observed recidivism rate. However, there are irregularities at some points 
+(e.g., Score 10 appears to drop slightly).
+The error bars  indicate uncertainty. 
+
+
+\newpage
+
+### Q10.
+
+
+### a.
+
+
+
+We start with the conditional expectation of \( R \) given \( X = x \):
+
+\[
+\mathbb{E}[R | X = x] = \mathbb{E} \left[ \frac{Y - \mu(X)}{\sqrt{\mu(X)(1 - \mu(X))}} \Bigg| X = x \right]
+\]
+
+
+
+By definition, the conditional expectation \( \mu(X) \) is given by:
+
+\[
+\mu(X) = \mathbb{E}[Y | X = x]
+\]
+
+Substituting this into the equation:
+
+\[
+\mathbb{E}[R | X = x] = \mathbb{E} \left[ \frac{Y - \mathbb{E}[Y | X = x]}{\sqrt{\mu(X)(1 - \mu(X))}} \Bigg| X = x \right]
+\]
+
+
+Using the linearity property of expectation:
+
+\[
+\mathbb{E} \left[ \frac{Y - \mathbb{E}[Y | X = x]}{\sqrt{\mu(X)(1 - \mu(X))}} \Bigg| X = x \right]
+= \frac{1}{\sqrt{\mu(X)(1 - \mu(X))}} \mathbb{E} \left[ Y - \mathbb{E}[Y | X = x] \Bigg| X = x \right]
+\]
+
+
+By definition of conditional expectation:
+
+\[
+\mathbb{E}[Y | X = x] = \mu(X)
+\]
+
+Since \( \mathbb{E}[Y | X = x] \) is a deterministic quantity (a function of \( x \)), we can factor it out:
+
+\[
+\mathbb{E} \left[ Y - \mathbb{E}[Y | X = x] \Bigg| X = x \right]
+= \mathbb{E}[Y | X = x] - \mathbb{E}[Y | X = x] = 0
+\]
+
+
+
+Substituting this result back:
+
+\[
+\mathbb{E}[R | X = x] = \frac{0}{\sqrt{\mu(X)(1 - \mu(X))}} = 0
+\]
+
+Thus, we conclude:
+
+\[
+\mathbb{E}[R | X = x] = 0.
+\]
+
+This proves that the expected value of the normalized residual \( R \) is zero given \( X = x \).
+
+
+### Variance. 
+Using the variance definition:
+
+\[
+\text{Var}[R | X = x] = \mathbb{E}[R^2 | X = x] - (\mathbb{E}[R | X = x])^2.
+\]
+
+Since we already proved \( \mathbb{E}[R | X = x] = 0 \), the variance simplifies to:
+
+\[
+\text{Var}[R | X = x] = \mathbb{E}[R^2 | X = x].
+\]
+
+Now, squaring the residual definition:
+
+\[
+R^2 = \frac{(Y - \mu(X))^2}{\mu(X)(1 - \mu(X))}.
+\]
+
+Taking expectation:
+
+\[
+\mathbb{E}[R^2 | X = x] = \mathbb{E} \left[ \frac{(Y - \mu(X))^2}{\mu(X)(1 - \mu(X))} \Bigg| X = x \right].
+\]
+
+Since \( \frac{1}{\mu(X)(1 - \mu(X))} \) is a constant when conditioning on \( X = x \), we factor it out:
+
+\[
+\mathbb{E}[R^2 | X = x] = \frac{1}{\mu(X)(1 - \mu(X))} \mathbb{E}[(Y - \mu(X))^2 | X = x].
+\]
+
+By the definition of conditional variance,
+
+\[
+\mathbb{E}[(Y - \mu(X))^2 | X = x] = \text{Var}[Y | X = x].
+\]
+
+Since \( Y \) follows a Bernoulli distribution with probability \( \mu(X) \), we use the Bernoulli variance formula:
+
+\[
+\text{Var}[Y | X = x] = \mu(X)(1 - \mu(X)).
+\]
+
+Thus,
+
+\[
+\mathbb{E}[R^2 | X = x] = \frac{\mu(X)(1 - \mu(X))}{\mu(X)(1 - \mu(X))} = 1.
+\]
+
+Therefore, we have shown:
+
+\[
+\text{Var}[R | X = x] = 1.
+\]
+
+
+
+
+
+## Question b
+
+
+The residual is defined as:
+
+\[
+R = \frac{Y - \hat{p}(X)}{\sqrt{\hat{p}(X)(1 - \hat{p}(X))}}
+\]
+
+where \( \hat{p}(X) \) is the predicted probability of \( Y = 1 \) given \( X \).
+
+
+The expected value:
+
+\[
+\mathbb{E}[R | X] = \frac{\mathbb{E}[Y | X] - \hat{p}(X)}{\sqrt{\hat{p}(X)(1 - \hat{p}(X))}} = \frac{\hat{p}(X) - \hat{p}(X)}{\sqrt{\hat{p}(X)(1 - \hat{p}(X))}} = 0.
+\]
+
+The variance:
+
+\[
+\text{Var}[R | X] = \frac{\text{Var}[Y | X]}{\hat{p}(X)(1 - \hat{p}(X))} = 
+\frac{\hat{p}(X)(1 - \hat{p}(X))}{\hat{p}(X)(1 - \hat{p}(X))} = 1.
+\]
+
+Thus, the residual  always has mean 0 and variance 1 when the model is correct.
+
+
+
+
+
+
+### c.
+
+```{r}
+logit_model <- glm(two_year_recid ~ age + priors_count, data=train_df, family=binomial)
+tree_model <- tree(as.factor(two_year_recid) ~ . -v_score, data=train_df)
+gam_model<-gam(two_year_recid ~ s(age) + s(priors_count), family=binomial, data=train_df)
+
+
+logit_preds <- predict(logit_model, newdata = test_df, type = "response")
+logit_residuals <- (test_df$two_year_recid - logit_preds) / sqrt(logit_preds * (1 - logit_preds))
+
+
+gam_preds <- predict(gam_model, newdata = test_df, type = "response")
+gam_residuals <- (test_df$two_year_recid - gam_preds) / sqrt(gam_preds * (1 - gam_preds))
+
+
+tree_preds <- predict(tree_model, newdata = test_df, type = "vector")[, 2]  
+tree_residuals <- (test_df$two_year_recid - tree_preds) / sqrt(tree_preds * (1 - tree_preds))
+
+
+residuals_df <- data.frame(
+  Probability = c(logit_preds, gam_preds, tree_preds),
+  Residuals = c(logit_residuals, gam_residuals, tree_residuals),
+  Model = rep(c("Logistic Regression", "GAM", "Decision Tree"), each = nrow(test_df))
+)
+
+```
+```{r}
+
+
+plot(logit_preds, logit_residuals, col = "red", pch = 16, cex = 0.6,
+     xlab = "Predicted Probability", ylab = "Residuals",
+     main = "Residuals vs. Predicted Probabilities (Logistic Regression)")
+lines(smooth.spline(logit_preds, logit_residuals), col = "darkred", lwd = 2)
+abline(h = 0, lty = 2, col = "gray")
+
+
+plot(gam_preds, gam_residuals, col = "skyblue", pch = 16, cex = 0.6,
+     xlab = "Predicted Probability", ylab = "Residuals",
+     main = "Residuals vs. Predicted Probabilities (GAM)")
+lines(smooth.spline(gam_preds, gam_residuals), col = "blue", lwd = 2)
+abline(h = 0, lty = 2, col = "gray")
+
+
+plot(tree_preds, tree_residuals, col = "black", pch = 16, cex = 0.6,
+     xlab = "Predicted Probability", ylab = "Residuals",
+     main = "Residuals vs. Predicted Probabilities (Decision Tree)")
+lines(smooth.spline(tree_preds, tree_residuals), col = "black", lwd = 2)
+abline(h = 0, lty = 2, col = "gray")
+
+```
+
+Among the three models, the decision tree model has residuals that are the closest 
+to being flat around 0, suggesting that it might be making relatively unbiased 
+predictions. However, its limited range of predicted probabilities may indicate 
+underfitting. The logistic regression and GAM models show systematic patterns in 
+their residuals, implying some level of model bias or mis-specification.
+
+
+### d.
+```{r}
+
+logit_preds <- predict(logit_model, newdata = test_df, type = "response")
+logit_residuals <- (test_df$two_year_recid - logit_preds) / sqrt(logit_preds * (1 - logit_preds))
+
+
+gam_preds <- predict(gam_model, newdata = test_df, type = "response")
+gam_residuals <- (test_df$two_year_recid - gam_preds) / sqrt(gam_preds * (1 - gam_preds))
+
+
+tree_preds <- predict(tree_model, newdata = test_df, type = "vector")[, 2]  
+tree_residuals <- (test_df$two_year_recid - tree_preds) / sqrt(tree_preds * (1 - tree_preds))
+test_df$logit_residuals_sq <- logit_residuals^2
+test_df$gam_residuals_sq <- gam_residuals ^2
+test_df$tree_residuals_sq <- tree_residuals ^2
+
+
+test_df$logit_preds <- predict(logit_model, test_df, type="response")
+test_df$gam_preds <- predict(gam_model, test_df, type="response")
+test_df$tree_preds <- predict(tree_model, test_df, type="vector")[,2]
+
+plot_residuals_base <- function(preds, residuals, model_name, color) {
+  
+
+  plot(preds, residuals, 
+       main = paste("Squared Residuals vs. Predicted Probabilities (", model_name, ")", sep=""),
+       xlab = "Predicted Probability", 
+       ylab = "Squared Residuals")
+
+
+  spline_fit <- smooth.spline(preds, residuals)
+  lines(spline_fit, col = color, lwd = 2)
+
+}
+
+
+par(mfrow = c(1,1)) 
+
+
+plot_residuals_base(test_df$logit_preds, test_df$logit_residuals_sq, "Logistic Regression", "red")
+plot_residuals_base(test_df$gam_preds, test_df$gam_residuals_sq, "GAM", "blue")
+plot_residuals_base(test_df$tree_preds, test_df$tree_residuals_sq, "Decision Tree", "black")
+
+
+
+```
+### d. 
+The tree model's  squared residuals (nearly) flat around 1. 
+
+
+### e. 
+
+The COMPAS score is an ordinal risk score (1-10), not a probability estimate. 
+It does not give a probability of recidivism but rather a ranking of risk.
+
+The squared residuals used in the previous plots rely on a model predicting a probability, 
+so this calculation does not work directly.
+
+\newpage
+
+
+###   Q11.
+
+Based on the evaluation of the logistic regression, GAM, decision tree models, and 
+COMPAS, I recommend that Riverdale County adopt the GAM for pre-trial release screening. 
+Among the three statistical models, GAM provides the best balance between flexibility 
+and interpretability, as its calibration plot shows that predicted probabilities closely 
+align with observed recidivism rates,  outperforming the logistic model, which 
+exhibited poor calibration at higher probability levels. 
+
+ In terms of classification accuracy and the trade-off 
+between false positive and false negative rates, both GAM and logistic regression perform well, 
+whereas the decision tree model has more erratic variations across different thresholds. 
+
+Moreover, COMPAS should not be used due to significant limitations: it does not 
+output probability estimates, making risk interpretation difficult, and its 
+recidivism frequency plot shows irregularities rather than a monotonic increase, 
+raising concerns about reliability. 
+Given these considerations, GAM is the best choice as it provides a well-calibrated, 
+flexible, and interpretable model for Riverdale County’s pre-trial risk assessment. 
+
+
+\newpage
+
+### Q12.
+
+10 hours
+
+
+
+### Bonus.
+
+
+### Q1. 
+### a.
+
+```{r}
+
+library(ggplot2)
+
+
+test_df$black <- ifelse(test_df$race == "African-American", "Black", "Non-Black")
+
+
+calculate_fnr_fpr <- function(model_preds, actual) {
+  thresholds <- seq(0, 1, length.out=101)
+  results <- data.frame(Threshold = thresholds, FNR_Black = NA, FPR_Black = NA, FNR_NonBlack = NA, FPR_NonBlack = NA)
+
+  for (t in thresholds) {
+    preds_black <- ifelse(model_preds[test_df$black == "Black"] >= t, 1, 0)
+    preds_nonblack <- ifelse(model_preds[test_df$black == "Non-Black"] >= t, 1, 0)
+
+    actual_black <- actual[test_df$black == "Black"]
+    actual_nonblack <- actual[test_df$black == "Non-Black"]
+
+    
+    FP_Black <- sum(preds_black == 1 & actual_black == 0)
+    TN_Black <- sum(preds_black == 0 & actual_black == 0)
+    FN_Black <- sum(preds_black == 0 & actual_black == 1)
+    TP_Black <- sum(preds_black == 1 & actual_black == 1)
+
+   
+    FP_NonBlack <- sum(preds_nonblack == 1 & actual_nonblack == 0)
+    TN_NonBlack <- sum(preds_nonblack == 0 & actual_nonblack == 0)
+    FN_NonBlack <- sum(preds_nonblack == 0 & actual_nonblack == 1)
+    TP_NonBlack <- sum(preds_nonblack == 1 & actual_nonblack == 1)
+
+    
+    results$FPR_Black[results$Threshold == t] <- ifelse((FP_Black + TN_Black) > 0, FP_Black / (FP_Black + TN_Black), NA)
+    results$FNR_Black[results$Threshold == t] <- ifelse((FN_Black + TP_Black) > 0, FN_Black / (FN_Black + TP_Black), NA)
+    
+    results$FPR_NonBlack[results$Threshold == t] <- ifelse((FP_NonBlack + TN_NonBlack) > 0, FP_NonBlack / (FP_NonBlack + TN_NonBlack), NA)
+    results$FNR_NonBlack[results$Threshold == t] <- ifelse((FN_NonBlack + TP_NonBlack) > 0, FN_NonBlack / (FN_NonBlack + TP_NonBlack), NA)
+  }
+
+  return(results)
+}
+
+logit_preds <- predict(logit_model, test_df, type="response")
+gam_preds <- predict(gam_model, test_df, type="response")
+tree_preds <- predict(tree_model, test_df, type="vector")[, 2] 
+compas_preds <- test_df$v_score / 10  # Normalize COMPAS scores
+
+logit_results <- calculate_fnr_fpr(logit_preds, test_df$two_year_recid)
+gam_results <- calculate_fnr_fpr(gam_preds, test_df$two_year_recid)
+tree_results <- calculate_fnr_fpr(tree_preds, test_df$two_year_recid)
+
+plot_fnr_fpr <- function(results, model_name) {
+  ggplot(results, aes(x = FPR_Black, y = FNR_Black)) +
+    geom_line(color = "blue", size = 1) +
+    geom_line(aes(x = FPR_NonBlack, y = FNR_NonBlack), color = "red", size = 1) +
+    labs(title = paste("FNR vs. FPR for", model_name),
+         x = "False Positive Rate (FPR)",
+         y = "False Negative Rate (FNR)",
+         color = "Race") +
+    scale_color_manual(values = c("Black" = "blue", "Non-Black" = "red")) +
+    theme_minimal()
+}
+
+
+plot_fnr_fpr(logit_results, "Logistic Regression")
+plot_fnr_fpr(gam_results, "GAM")
+plot_fnr_fpr(tree_results, "Decision Tree")
+
+
+compute_fpr_fnr <- function(t, data) {
+  predictions <- ifelse(data$v_score >= t, 1, 0)
+
+  TP <- sum(predictions == 1 & data$two_year_recid == 1)
+  FP <- sum(predictions == 1 & data$two_year_recid == 0)
+  TN <- sum(predictions == 0 & data$two_year_recid == 0)
+  FN <- sum(predictions == 0 & data$two_year_recid == 1)
+
+  FPR <- ifelse((FP + TN) > 0, FP / (FP + TN), NA)
+  FNR <- ifelse((FN + TP) > 0, FN / (FN + TP), NA)
+
+  return(c(FPR, FNR))
+}
+
+compas_thresholds <- 1:10
+
+
+error_rates_black <- t(sapply(compas_thresholds, compute_fpr_fnr, data = test_df[test_df$black == "Black", ]))
+error_rates_non_black <- t(sapply(compas_thresholds, compute_fpr_fnr, data = test_df[test_df$black == "Non-Black", ]))
+
+
+fnr_fpr_black <- data.frame(Threshold = compas_thresholds, FPR = error_rates_black[, 1], FNR = error_rates_black[, 2])
+fnr_fpr_non_black <- data.frame(Threshold = compas_thresholds, FPR = error_rates_non_black[, 1], FNR = error_rates_non_black[, 2])
+
+
+ggplot() +
+  geom_line(data = fnr_fpr_black, aes(x = FPR, y = FNR, color = "Black"), size = 1) +
+  geom_line(data = fnr_fpr_non_black, aes(x = FPR, y = FNR, color = "Non-Black"), size = 1) +
+  labs(title = "FNR vs. FPR by Race (COMPAS)",
+       x = "False Positive Rate (FPR)",
+       y = "False Negative Rate (FNR)",
+       color = "Race") +
+  scale_color_manual(values = c("Black" = "blue", "Non-Black" = "red")) +
+  theme_minimal()
+
+```
+### a (continued).
+
+None of the models or COMPAS achieve perfectly equal error rates across racial 
+groups at any threshold. However, some models come closer than others.
+
+The decision tree model demonstrates relatively smaller disparities in error rates,
+but the curves are still not perfectly aligned.
+
+The GAM model exhibits a more noticeable gap between racial groups in its FNR-FPR 
+tradeoff, especially at lower thresholds. 
+
+For COMPAS, the disparity in error rates is visible across different thresholds,
+with black individuals exhibiting a higher false negative rate at certain points. 
+The logistic regression model shows a similar trend as COMPAS. 
+
+
+\newpage
+
+### Q2. 
+
+### a.
+```{r}
+
+test_df$sex <- as.factor(test_df$sex)
+test_df$male <- ifelse(test_df$sex == "Male", "Male", "Female")
+
+compas_scores <- test_df$v_score  
+actual_values <- as.numeric(test_df$two_year_recid) 
+
+compas_thresholds <- 1:10 
+
+compute_fpr_fnr <- function(t, data) {
+  predictions <- ifelse(data$v_score >= t, 1, 0)  
+  
+ 
+  TP <- sum(predictions == 1 & data$two_year_recid == 1)
+  FP <- sum(predictions == 1 & data$two_year_recid == 0)
+  TN <- sum(predictions == 0 & data$two_year_recid == 0)
+  FN <- sum(predictions == 0 & data$two_year_recid == 1)
+
+
+  FPR <- FP / (FP + TN) 
+  FNR <- FN / (FN + TP)  
+  
+  return(c(FPR, FNR))
+}
+error_rates_male <- t(sapply(compas_thresholds, compute_fpr_fnr, data = test_df[test_df$male == "Male", ]))
+error_rates_female <- t(sapply(compas_thresholds, compute_fpr_fnr, data = test_df[test_df$male == "Female", ]))
+
+
+fnr_fpr_male <- data.frame(Threshold = compas_thresholds, FPR = error_rates_male[, 1], FNR = error_rates_male[, 2])
+fnr_fpr_female <- data.frame(Threshold = compas_thresholds, FPR = error_rates_female[, 1], FNR = error_rates_female[, 2])
+
+
+
+ggplot() +
+  geom_line(data = fnr_fpr_male, aes(x = FPR, y = FNR, color = "Male"), size = 1) +
+  geom_line(data = fnr_fpr_female, aes(x = FPR, y = FNR, color = "Female"), size = 1) +
+  labs(title = "FNR vs. FPR by Sex (COMPAS)",
+       x = "False Positive Rate (FPR)",
+       y = "False Negative Rate (FNR)",
+       color = "Sex") +
+  theme_minimal()
+
+
+
+
+# logistic model
+logit_preds <- predict(logit_model, newdata = test_df, type = "response")
+
+compute_fpr_fnr_model <- function(t, preds, actual) {
+  predictions <- ifelse(preds >= t, 1, 0)
+  TP <- sum(predictions == 1 & actual == 1)
+  FP <- sum(predictions == 1 & actual == 0)
+  TN <- sum(predictions == 0 & actual == 0)
+  FN <- sum(predictions == 0 & actual == 1)
+  
+  FPR <- FP / (FP + TN)
+  FNR <- FN / (FN + TP)
+  return(c(FPR, FNR))
+}
+
+logit_error_male <- t(sapply(seq(0.1, 0.9, by = 0.1), compute_fpr_fnr_model, preds = logit_preds[test_df$male == "Male"], actual = actual_values[test_df$male == "Male"]))
+logit_error_female <- t(sapply(seq(0.1, 0.9, by = 0.1), compute_fpr_fnr_model, preds = logit_preds[test_df$male == "Female"], actual = actual_values[test_df$male == "Female"]))
+
+
+logit_fnr_fpr_male <- data.frame(Threshold = seq(0.1, 0.9, by = 0.1), FPR = logit_error_male[, 1], FNR = logit_error_male[, 2])
+logit_fnr_fpr_female <- data.frame(Threshold = seq(0.1, 0.9, by = 0.1), FPR = logit_error_female[, 1], FNR = logit_error_female[, 2])
+
+
+#gam
+gam_preds <- predict(gam_model, newdata = test_df, type = "response")
+
+gam_error_male <- t(sapply(seq(0.1, 0.9, by = 0.1), compute_fpr_fnr_model, preds = gam_preds[test_df$male == "Male"], actual = actual_values[test_df$male == "Male"]))
+gam_error_female <- t(sapply(seq(0.1, 0.9, by = 0.1), compute_fpr_fnr_model, preds = gam_preds[test_df$male == "Female"], actual = actual_values[test_df$male == "Female"]))
+
+gam_fnr_fpr_male <- data.frame(Threshold = seq(0.1, 0.9, by = 0.1), FPR = gam_error_male[, 1], FNR = gam_error_male[, 2])
+gam_fnr_fpr_female <- data.frame(Threshold = seq(0.1, 0.9, by = 0.1), FPR = gam_error_female[, 1], FNR = gam_error_female[, 2])
+
+
+tree_preds <- predict(tree_model, newdata = test_df, type = "vector")[, 2]
+
+tree_error_male <- t(sapply(seq(0.1, 0.9, by = 0.1), 
+                            compute_fpr_fnr_model, preds = tree_preds[test_df$male == "Male"], actual = actual_values[test_df$male == "Male"]))
+tree_error_female <- t(sapply(seq(0.1, 0.9, by = 0.1), 
+                              compute_fpr_fnr_model, preds = tree_preds[test_df$male == "Female"], actual = actual_values[test_df$male == "Female"]))
+
+tree_fnr_fpr_male <- data.frame(Threshold = seq(0.1, 0.9, by = 0.1), FPR = tree_error_male[, 1], FNR = tree_error_male[, 2])
+tree_fnr_fpr_female <- data.frame(Threshold = seq(0.1, 0.9, by = 0.1), FPR = tree_error_female[, 1], FNR = tree_error_female[, 2])
+
+```
+
+
+```{r}
+library(ggplot2)
+
+p1 <- ggplot() +
+  geom_line(data = logit_fnr_fpr_male, aes(x = FPR, y = FNR, color = "Male"), size = 1) +
+  geom_line(data = logit_fnr_fpr_female, aes(x = FPR, y = FNR, color = "Female"), size = 1) +
+  labs(title = "FNR vs. FPR by Sex (Logistic Regression)", 
+       x = "False Positive Rate (FPR)", y = "False Negative Rate (FNR)", color = "Sex") +
+  theme_minimal()
+
+
+p2 <- ggplot() +
+  geom_line(data = gam_fnr_fpr_male, aes(x = FPR, y = FNR, color = "Male"), size = 1) +
+  geom_line(data = gam_fnr_fpr_female, aes(x = FPR, y = FNR, color = "Female"), size = 1) +
+  labs(title = "FNR vs. FPR by Sex (GAM Model)", x = "False Positive Rate (FPR)", 
+       y = "False Negative Rate (FNR)", color = "Sex") +
+  theme_minimal()
+
+
+p3 <- ggplot() +
+  geom_line(data = tree_fnr_fpr_male, aes(x = FPR, y = FNR, color = "Male"), size = 1) +
+  geom_line(data = tree_fnr_fpr_female, aes(x = FPR, y = FNR, color = "Female"), size = 1) +
+  labs(title = "FNR vs. FPR by Sex (Decision Tree)", x = "False Positive Rate (FPR)", 
+       y = "False Negative Rate (FNR)", color = "Sex") +
+  theme_minimal()
+
+
+print(p1)
+print(p2)
+print(p3)
+
+```
+### Bonus 2a(continued).
+
+In every model, there are some differences between the error rates for male and 
+female arrestees at most thresholds.
+The disparities tend to be larger at lower FPR levels, where female FNR is often 
+higher than male FNR.The Decision Tree and GAM models seem to come closest to 
+parity, as their lines for male and female arrestees are more aligned compared 
+to other models. COMPAS and Logistic Regression show more differentiations. 
