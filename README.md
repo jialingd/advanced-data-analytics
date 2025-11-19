@@ -1,109 +1,73 @@
-Predictive Modeling of Violent Recidivism Using the COMPAS Dataset
+# Predictive Modeling of Violent Recidivism Using the COMPAS Dataset
 
-This project focuses on predictive modeling of violent recidivism using the COMPAS dataset.
-The code evaluates and compares several statistical learning models — logistic regression (GLM), generalized additive models (GAM), and decision trees — to assess their performance, interpretability, and fairness relative to the proprietary COMPAS risk score used in U.S. pretrial decisions.
+## Overview
+This project analyzes the COMPAS dataset to build interpretable statistical models for predicting violent recidivism. The research evaluates and compares multiple statistical learning approaches — logistic regression (GLM), generalized additive models (GAM), and decision trees — assessing their performance, interpretability, and fairness relative to the proprietary COMPAS risk score used in U.S. pretrial decisions.
 
-🧠 Objectives
+## Objectives
+- Build interpretable statistical models to predict violent re-arrest within two years
+- Compare predictive accuracy, calibration, and bias across GAM, GLM, and decision tree models
+- Benchmark against the commercial COMPAS algorithm
+- Evaluate performance trade-offs (accuracy, FPR/FNR, calibration) and discuss ethical implications of algorithmic decision-making in criminal justice
 
-Build interpretable statistical models to predict violent re-arrest within two years.
-
-Compare predictive accuracy, calibration, and bias of GAM, GLM, and decision tree models.
-
-Benchmark these models against the commercial COMPAS algorithm.
-
-Evaluate performance trade-offs (accuracy, FPR/FNR, calibration) and discuss ethical implications of algorithmic decision-making in the criminal justice system.
-
-📊 Data
-
+## 📊 Dataset
 The dataset contains pretrial defendant records including:
+- **Demographics**: age, sex, race
+- **Criminal history**: prior counts, charges  
+- **Outcome**: re-arrest for violent crime within 2 years
+- **COMPAS score**: 1–10 ordinal risk rating
 
-Demographics: age, sex, race
+### Data Preprocessing
+- Randomly split data into training and testing sets
+- Ensure unbiased model validation using test set for final performance reporting
+- Handle class imbalance and missing values as documented in code
 
-Criminal history: prior counts, charges
+##  Analysis Approach
 
-Outcome: re-arrest for violent crime within 2 years
+### 1. Baseline Evaluation
+- Estimate base recidivism rate (~18.4%) on test set
+- Validate random train/test splitting for unbiased performance estimation
 
-COMPAS score: 1–10 ordinal risk rating
+### 2. Logistic Regression (GLM)
+- Model: `recidivism ~ age + priors_count`
+- Key findings:
+  - Older individuals less likely to recidivate (β_age < 0)
+  - Prior convictions increase risk (β_priors > 0)
+- Compute predicted probabilities with 95% confidence intervals for example defendant profiles
 
-Data preprocessing steps:
+### 3. Threshold Analysis
+- Examine accuracy, FPR, and FNR across classification thresholds
+- Identify optimal threshold ≈ 0.39 with baseline accuracy ≈ 0.816
 
-Randomly split data into training and testing sets.
+### 4. Generalized Additive Model (GAM)
+- Model nonlinear smooths of age and priors_count
+- Visualize smooth functions capturing diminishing marginal effects
+- GAM shows slightly better performance at low thresholds compared to logistic regression
 
-Ensure unbiased model validation by using the test set for final performance reporting.
+### 5. Decision Tree Model
+- Construct decision tree using recursive partitioning
+- Visualize splits on age and priors_count
+- Model shows limited predictive power, predicting mostly "no recidivism"
 
-Handle class imbalance and missing values as noted in code comments.
+### 6. Model Comparison
+- Accuracy vs. threshold plots show GAM and GLM outperform Decision Tree
+- FNR vs. FPR curves demonstrate superior stability and calibration for GAM/GLM
+- Calibration plots confirm GAM's better alignment with observed recidivism frequencies
 
- 
- Analysis Steps
+### 7. COMPAS Benchmark
+- COMPAS performs near baseline accuracy, below GAM/GLM models
+- Bias analysis via FNR–FPR plots reveals demographic disparities by race and sex
 
-1.  Baseline Evaluation
+### 8. Residual Diagnostics
+- Plot residuals and squared residuals vs. predicted probabilities
+- Verify homoscedasticity and model calibration assumptions
 
-Estimate base recidivism rate (~18.4%) on test set.
+## Model Recommendation
+**GAM** is recommended for Riverdale County's pretrial screening system due to:
+- Superior calibration and interpretability
+- Ability to capture nonlinear effects without overfitting
+- Balanced performance across metrics
 
-Justify random train/test splitting for unbiased performance estimation.
+**Logistic regression** serves as a viable alternative when model simplicity is prioritized.
 
-2.  Logistic Regression (GLM)
-
-Model: recidivism ~ age + priors_count
-
-Interpret log-odds coefficients:
-
-Older individuals less likely to recidivate (β_age < 0)
-
-Prior convictions increase risk (β_priors > 0)
-
-Compute predicted probabilities with 95% confidence intervals for four example profiles (Archie, Betty, Chuck, Veronica).
-
-3. Threshold Analysis
-
-Examine accuracy, false-positive rate (FPR), and false-negative rate (FNR) as functions of the classification threshold.
-
-Identify optimal threshold ≈ 0.39, with baseline accuracy ≈ 0.816.
-
-4.  Generalized Additive Model (GAM)
-
-Model nonlinear smooths of age and priors_count.
-
-Visualize smooth functions s(age) and s(priors_count) to capture diminishing marginal effects.
-
-Compare GAM vs. logistic regression accuracy curves — GAM slightly better at low thresholds, comparable at moderate ones.
-
-5.  Decision Tree Model
-
-Construct decision tree using recursive partitioning.
-
-Visualize splits on age and priors_count.
-
-Discuss over-simplified output (predicts mostly “no recidivism”) and its limited predictive power.
-
-6.  Model Comparison
-
-Generate accuracy vs. threshold plots for all models (GLM, GAM, Decision Tree).
-
-FNR vs. FPR curves show GAM and GLM outperform Decision Tree in stability and calibration.
-
-Calibration plots demonstrate GAM’s superior alignment with observed recidivism frequencies.
-
-7.  COMPAS Benchmark
-
-Evaluate COMPAS threshold-based accuracy and FNR/FPR.
-
-Show that COMPAS performs near baseline accuracy, below GAM/GLM models.
-
-Illustrate bias via FNR–FPR plots by race and sex, revealing demographic disparities in algorithmic predictions.
-
-8. Residual Diagnostics
-
-Plot residuals and squared residuals vs. predicted probabilities for all models.
-
-Verify that residual patterns support homoscedasticity and model calibration assumptions.
-
-9.  Model Recommendation
-
-Recommend GAM for Riverdale County’s pretrial screening system:
-
-Well-calibrated and interpretable
-
-Captures nonlinear effects while avoiding overfitting
-
-Logistic regression serves as the next-best alternative if simplicity is prioritized.
+## ⚖️ Ethical Considerations
+The analysis highlights important ethical implications regarding algorithmic fairness, demographic biases in risk assessment tools, and the responsibility in deploying predictive models in criminal justice contexts.
